@@ -1,7 +1,7 @@
-import type { Instrument } from './types';
+import type { Kit } from './types';
 
-const DB_NAME = 'autosampler';
-const STORE = 'instruments';
+const DB_NAME = 'samplr';
+const STORE = 'kits';
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -23,16 +23,16 @@ function tx<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequ
   );
 }
 
-export function saveInstrument(instrument: Instrument): Promise<IDBValidKey> {
-  return tx('readwrite', (s) => s.put(instrument));
+export function saveKit(kit: Kit): Promise<IDBValidKey> {
+  return tx('readwrite', (s) => s.put(kit));
 }
 
-export function listInstruments(): Promise<Instrument[]> {
-  return tx<Instrument[]>('readonly', (s) => s.getAll() as IDBRequest<Instrument[]>).then((all) =>
+export function listKits(): Promise<Kit[]> {
+  return tx<Kit[]>('readonly', (s) => s.getAll() as IDBRequest<Kit[]>).then((all) =>
     all.sort((a, b) => b.createdAt - a.createdAt),
   );
 }
 
-export function deleteInstrument(id: string): Promise<undefined> {
+export function deleteKit(id: string): Promise<undefined> {
   return tx('readwrite', (s) => s.delete(id));
 }

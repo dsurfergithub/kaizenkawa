@@ -179,52 +179,78 @@ button:disabled {
   flex-wrap: wrap;
 }
 
-.panel--keyboard {
-  position: sticky;
-  bottom: 8px;
-}
-
-.keyboard {
-  position: relative;
-  display: flex;
-  height: 150px;
-  border-radius: 8px;
-  overflow: hidden;
-  touch-action: none;
+.pads {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  touch-action: manipulation;
   user-select: none;
 }
 
-.keyboard--disabled {
-  opacity: 0.4;
-}
-
-.key {
-  border: 1px solid #1a1e26;
-}
-
-.key--white {
-  background: #f2f4f8;
-  color: #556;
+.pad {
+  position: relative;
+  aspect-ratio: 1;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: #1f2530;
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  font-size: 0.6rem;
-  padding-bottom: 4px;
+  gap: 2px;
+  cursor: pointer;
 }
 
-.key--white:active {
-  background: #c9dcf7;
+.pad:active {
+  background: #2c3546;
+  transform: scale(0.97);
 }
 
-.key--black {
+.pad--selected {
+  background: #26324a;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.pad__num {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.pad__label {
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+
+.pad__edit {
   position: absolute;
-  top: 0;
-  height: 58%;
-  background: #14171d;
-  border-radius: 0 0 4px 4px;
-  z-index: 2;
+  top: 4px;
+  right: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 6px;
+  font-size: 0.8rem;
 }
 
-.key--black:active {
-  background: #2f4668;
+.macros {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.macros__name em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.pad-editor__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pad-editor__head h2 {
+  margin: 0;
 }

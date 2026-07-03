@@ -1,88 +1,87 @@
-# KaizenKawa AutoSampler
+# KaizenKawa Samplr
 
-Clon de la idea de **Auto Sampler** (Logic Pro / MainStage) pensado para **móvil** y **100 % local**: recorre automáticamente un rango de notas, dispara cada nota en un instrumento (por MIDI o con el sinte interno de demo), graba el audio resultante, lo procesa y construye un **instrumento multi-muestreado** que puedes tocar al momento y exportar en formato **SFZ**.
+Clon del concepto de **[AutoSamplr](https://autosamplr.com/)** pensado para **móvil** y **100 % local**: importas una canción, la app busca automáticamente los **momentos musicalmente útiles** (no cortes a intervalos fijos), los puntúa por sonoridad, ataque, contenido espectral, timbre y lo distinto que es cada sonido de los demás, y monta un **kit de 16 pads tocable** que puedes ajustar con macros y exportar como **WAVs numerados** para tu sampler favorito.
 
-Todo ocurre en el dispositivo: no hay servidor, no hay cuentas, no sale audio de tu móvil.
+Todo el análisis ocurre en el dispositivo: no hay servidor, no hay cuentas, el audio no sale de tu móvil.
 
-## Evaluación: qué hace falta y qué stack se eligió
+## Cómo funciona (pipeline de análisis)
 
-### Qué hace un Auto Sampler
+1. **Decodificación** del archivo (MP3/WAV/OGG/M4A… lo que soporte el navegador) y mezcla a mono a 22 050 Hz para el análisis.
+2. **STFT** (FFT radix-2 propia, ventana Hann 1024, hop 512) calculando por frame: energía, *spectral flux*, centroide espectral (brillo), planitud espectral (suciedad/ruido) y proporción de graves.
+3. **Detección de onsets** por spectral flux con umbral adaptativo (media local × 1.3) y separación mínima de 90 ms.
+4. **Candidatos**: cada onset abre un slice hasta el siguiente onset (máx. 2.5 s), con pre-roll para no comerse el transitorio; se descartan los casi silenciosos. Cada candidato lleva su vector de características: RMS, factor de cresta (percusividad), tiempo de ataque, centroide, planitud, graves, duración y fuerza del onset.
+5. **Selección con diversidad**: las características se normalizan (z-score), se puntúan según las **macros**, y una selección greedy maximiza `puntuación + λ·(distancia mínima a lo ya elegido)` — así el kit no acaba con 16 versiones del mismo bombo. λ crece con la macro *Variedad*.
+6. **Construcción del kit**: los slices se extraen de la canción original a resolución completa, se recorta el silencio, se normaliza el pico y se aplica un fundido anti-clic.
 
-1. Reproduce cada N semitonos una nota (MIDI note-on → sostener → note-off) contra un instrumento fuente.
-2. Graba el audio de cada nota, incluida la cola de release.
-3. Procesa cada muestra: recorte de silencio, normalización, fundido anti-clic.
-4. Mapea las muestras en zonas de teclado (cada muestra cubre las teclas vecinas re-pitcheando).
-5. Deja un instrumento tocable y exportable a un formato estándar de sampler.
+### Macros (como los macro-controles de AutoSamplr)
 
-### Opciones de stack evaluadas
+| Macro | Efecto en la selección |
+|---|---|
+| **Ataque** | prefiere transitorios afilados y percusivos |
+| **Brillo** | prefiere sonidos con centroide espectral alto/bajo |
+| **Grit** | prefiere texturas ruidosas/sucias (planitud espectral) |
+| **Variedad** | exige más distancia tímbrica entre los 16 pads |
+
+Mueve las macros y pulsa **Re-seleccionar**: la re-selección es instantánea porque el análisis ya está hecho.
+
+## Funcionalidades
+
+- Importación de cualquier audio local del móvil (selector de archivos).
+- Kit de **16 pads** en rejilla 4×4, disparo táctil con multi-touch.
+- **Edición por pad**: ganancia, tono ±12 st, reverse, y 🎲 *cambiar sample* (lo sustituye por el mejor candidato no usado).
+- **Biblioteca local** de kits en IndexedDB — sobrevive a recargas y funciona offline.
+- **Exportación**: ZIP con WAVs numerados (`01.wav`…`16.wav`), la convención de importación en bloque de Koala, SP-404MKII, Logic, Maschine, Reason, Bitwig… Los WAVs se renderizan con los ajustes del pad aplicados.
+- **PWA instalable** con service worker: úsala sin conexión.
+
+## Evaluación técnica: por qué PWA
 
 | Opción | Pros | Contras |
 |---|---|---|
-| **PWA (Web Audio + Web MIDI)** ✅ elegida | Instalable en Android/iOS sin tiendas, offline total, un solo código, desarrollo y pruebas rápidos | Web MIDI no está en Safari iOS; latencia algo mayor que nativo |
-| React Native / Expo | Look nativo, acceso a audio nativo vía módulos | El audio de baja latencia requiere módulos nativos propios (Oboe/AVAudioEngine); doble build |
-| Flutter | Buen rendimiento UI | Mismo problema: audio serio = FFI a C++; ecosistema MIDI móvil verde |
-| Nativo (Kotlin + Swift) | Máximo control (AudioKit, Oboe, CoreMIDI/AMIDI) | Dos códigos, ciclo de desarrollo mucho más lento |
+| **PWA (Web Audio)** ✅ | Instalable en Android/iOS sin tiendas, offline total, un solo código, DSP suficiente en JS para este análisis | Sin acceso a la librería de música de iOS más allá del selector de archivos |
+| React Native / Flutter | Look nativo | El DSP serio exige módulos nativos/FFI; doble complejidad |
+| Nativo (Kotlin/Swift) | Máximo rendimiento | Dos códigos; innecesario: el análisis de una canción de 4 min tarda ~1-2 s en JS |
 
-La PWA cubre todo el flujo con APIs estándar: `Web MIDI` (disparo de notas a hardware), `getUserMedia`/`MediaRecorder` (grabación de la entrada de audio), `Web Audio`/`OfflineAudioContext` (síntesis, procesado y reproducción), `IndexedDB` (persistencia local de instrumentos y WAVs) y *service worker* (offline). Si más adelante se necesita latencia nativa o Web MIDI en iOS, el núcleo (`src/audio/`) es TypeScript puro y se puede envolver en Capacitor sin reescribirlo.
-
-### Matriz de soporte móvil
-
-| Función | Android (Chrome) | iOS (Safari) |
-|---|---|---|
-| Sinte interno demo + sampler | ✅ | ✅ |
-| Grabación por micrófono/interfaz | ✅ | ✅ |
-| Disparo MIDI a hardware externo | ✅ (USB-OTG / BLE MIDI) | ❌ Web MIDI no soportado → usar modo demo o un navegador con Web MIDI (p. ej. Web MIDI Browser) |
-| Instalación como app + offline | ✅ | ✅ (Añadir a pantalla de inicio) |
-
-## Funcionalidades actuales
-
-- **Sesión de auto-sampleo configurable**: rango de notas, intervalo en semitonos, velocity, duración de nota, cola de release.
-- **Dos fuentes**: sinte interno de demostración (render offline, sin hardware) o sinte externo vía **Web MIDI** grabando por la entrada de audio.
-- **Procesado por muestra**: recorte de silencio, normalización de pico y fade-out anti-clic.
-- **Mapeo automático de zonas**: cada muestra cubre hasta el punto medio con la siguiente; re-pitch por `playbackRate`.
-- **Teclado táctil multi-touch** con glissando para tocar el instrumento resultante.
-- **Biblioteca local** en IndexedDB: guarda, carga y borra instrumentos sin conexión.
-- **Exportación SFZ + WAVs en ZIP** (formato abierto, compatible con Sforzando, TAL Sampler, DecentSampler vía conversión, etc.).
-- **PWA**: manifest + service worker para instalarla y usarla sin red.
+La pieza que AutoSamplr tiene y esta versión no: **separación de stems** (voz/batería/bajo/resto) antes de trocear. Eso requiere un modelo de ML (tipo Demucs); es viable en local con ONNX Runtime Web + WebGPU, pero pesa decenas de MB y se deja como evolución (ver hoja de ruta). El resto del pipeline (slicing por interés musical + scoring + diversidad + macros + export de kits) está completo.
 
 ## Cómo ejecutarla
 
 ```bash
 npm install
-npm run dev        # desarrollo (accesible en LAN con --host ya activado)
-npm run build      # comprobación de tipos + build de producción en dist/
+npm run dev        # desarrollo (accesible desde el móvil en la misma red)
+npm run build      # chequeo de tipos + build de producción en dist/
 npm run preview    # sirve el build
 ```
 
-Para probarla en el móvil durante el desarrollo: arranca `npm run dev`, abre `http://<ip-del-pc>:5173` desde el móvil (misma red). Nota: `getUserMedia` y Web MIDI requieren **HTTPS o localhost**; para pruebas de micrófono en LAN usa un túnel HTTPS o despliega el `dist/` en cualquier hosting estático.
+Para usarla en el móvil: `npm run dev` y abre `http://<ip-del-pc>:5173`, o despliega `dist/` en cualquier hosting estático y añádela a la pantalla de inicio.
 
 ## Estructura
 
 ```
 src/
+  analysis/
+    fft.ts         # FFT radix-2 + ventana Hann
+    analyze.ts     # STFT, features por frame, onsets, candidatos
+    select.ts      # scoring con macros + selección greedy con diversidad
+    kitBuilder.ts  # extracción de slices y montaje del kit
   audio/
-    autosample.ts    # orquestación de la sesión de muestreo
-    demoSynth.ts     # sinte interno (OfflineAudioContext)
-    midi.ts          # salida Web MIDI (note on/off)
-    recorder.ts      # grabación de entrada de audio (MediaRecorder)
-    processing.ts    # trim de silencio, normalización, fades
-    samplerPlayer.ts # reproducción multi-zona con re-pitch
-    wav.ts           # codificación/decodificación WAV 16-bit
+    context.ts     # AudioContext compartido
+    padPlayer.ts   # disparo de pads (gain, pitch, reverse)
+    processing.ts  # trim de silencio, normalización, fades
+    wav.ts         # codificación/decodificación WAV 16-bit
   export/
-    sfz.ts           # generación de .sfz y empaquetado
-    zip.ts           # escritor ZIP sin dependencias (método store)
-  components/        # formulario de sesión, teclado táctil, biblioteca
-  db.ts              # persistencia IndexedDB
-  notes.ts           # utilidades de notas/rangos
+    kit.ts         # render de pads con ajustes + ZIP de WAVs numerados
+    zip.ts         # escritor ZIP sin dependencias (método store)
+  components/      # PadGrid, MacroControls, PadEditor, Library
+  db.ts            # persistencia IndexedDB
 public/
   manifest.webmanifest, sw.js, icons/   # PWA
 ```
 
-## Hoja de ruta sugerida
+## Hoja de ruta
 
-- [ ] Capas de velocity (muestrear varias dinámicas por nota y hacer crossfade).
-- [ ] Detección automática de puntos de loop (autocorrelación) para sustain infinito.
-- [ ] Entrada MIDI (tocar el sampler con un teclado físico).
-- [ ] Grabación vía AudioWorklet (PCM crudo, timing exacto) en lugar de MediaRecorder.
-- [ ] Import de instrumentos (ZIP/SFZ) y backup/restore de la biblioteca.
-- [ ] Envoltorio Capacitor si se necesita CoreMIDI en iOS o publicar en tiendas.
+- [ ] **Separación de stems local** (ONNX Runtime Web + WebGPU, modelo tipo Demucs cuantizado) y muestreo por stem, como AutoSamplr.
+- [ ] Análisis en un Web Worker para no tocar el hilo de UI con canciones largas.
+- [ ] Vista de forma de onda con los slices marcados y ajuste fino de inicio/fin por pad.
+- [ ] Export `.adg` (Ableton Drum Rack) y `.ablpresetbundle`.
+- [ ] Detección de tempo/compás para cuantizar slices a la rejilla.
+- [ ] Secuenciador de pasos simple para probar el kit en contexto.

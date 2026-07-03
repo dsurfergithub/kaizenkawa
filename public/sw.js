@@ -1,5 +1,5 @@
 /* Service worker: cachea el shell de la app para uso 100% offline. */
-const CACHE = 'autosampler-v1';
+const CACHE = 'samplr-v1';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/manifest.webmanifest', '/icons/icon.svg'])));

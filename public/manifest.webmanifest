@@ -1,7 +1,7 @@
 {
-  "name": "KaizenKawa AutoSampler",
-  "short_name": "AutoSampler",
-  "description": "Auto-sampleo de instrumentos y reproducción, 100% local en tu móvil.",
+  "name": "KaizenKawa Samplr",
+  "short_name": "Samplr",
+  "description": "Convierte canciones en kits de samples, 100% local en tu móvil.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",

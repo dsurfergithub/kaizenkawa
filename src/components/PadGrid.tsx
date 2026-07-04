@@ -1,4 +1,5 @@
 import type { Pad } from '../types';
+import { GROUP_COLORS } from './GrooveView';
 
 interface Props {
   pads: Pad[];
@@ -6,8 +7,6 @@ interface Props {
   onPlay: (pad: Pad) => void;
   onSelect: (pad: Pad) => void;
 }
-
-const PAD_COLORS = ['#4f9cf9', '#9d6ff9', '#f97f4f', '#3fc98f'];
 
 /** Rejilla 4×4 de pads: tocar reproduce; el botón ✎ selecciona para editar. */
 export default function PadGrid({ pads, selectedId, onPlay, onSelect }: Props) {
@@ -17,7 +16,7 @@ export default function PadGrid({ pads, selectedId, onPlay, onSelect }: Props) {
         <div
           key={pad.id}
           className={`pad${pad.id === selectedId ? ' pad--selected' : ''}`}
-          style={{ borderColor: PAD_COLORS[i % PAD_COLORS.length] }}
+          style={{ borderColor: GROUP_COLORS[pad.group] }}
           onPointerDown={(e) => {
             e.preventDefault();
             onPlay(pad);

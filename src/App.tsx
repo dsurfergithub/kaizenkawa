@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AnalysisPhase, Kit, Macros, Pad } from './types';
 import { NEUTRAL_MACROS } from './types';
-import { analyzeSong, type Analysis, type Candidate } from './analysis/analyze';
-import { pickReplacement, selectPads } from './analysis/select';
+import { analyzeSong, type Analysis } from './analysis/analyze';
+import { detectBpm } from './analysis/tempo';
+import { pickReplacement, selectGroupedPads, type GroupedCandidate } from './analysis/select';
 import { buildKit } from './analysis/kitBuilder';
 import { PadPlayer } from './audio/padPlayer';
+import { GrooveSequencer } from './audio/sequencer';
 import { getAudioContext } from './audio/context';
 import { deleteKit, listKits, saveKit } from './db';
 import { downloadBlob, exportKitZip } from './export/kit';
+import { renderTrackWav } from './export/track';
 import PadGrid from './components/PadGrid';
+import GrooveView from './components/GrooveView';
 import MacroControls from './components/MacroControls';
 import PadEditor from './components/PadEditor';
 import Library from './components/Library';
@@ -17,7 +21,7 @@ interface SourceSession {
   name: string;
   buffer: AudioBuffer;
   analysis: Analysis;
-  chosen: Candidate[];
+  chosen: GroupedCandidate[];
 }
 
 export default function App() {
@@ -27,8 +31,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [macros, setMacros] = useState<Macros>(NEUTRAL_MACROS);
   const [selectedPadId, setSelectedPadId] = useState<string | null>(null);
+  const [mode, setMode] = useState<'pads' | 'groove'>('groove');
+  const [playing, setPlaying] = useState(false);
+  const [activeIds, setActiveIds] = useState<Set<string>>(new Set());
+  const [pendingIds, setPendingIds] = useState<Map<string, boolean>>(new Map());
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [exporting, setExporting] = useState(false);
   const sourceRef = useRef<SourceSession | null>(null);
   const playerRef = useRef<PadPlayer | null>(null);
+  const sequencerRef = useRef<GrooveSequencer | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -38,11 +49,34 @@ export default function App() {
   const busy = phase !== null && phase !== 'listo';
 
   const player = () => (playerRef.current ??= new PadPlayer());
+  const sequencer = () => {
+    if (!sequencerRef.current) {
+      sequencerRef.current = new GrooveSequencer(player());
+      sequencerRef.current.onStep(setCurrentStep);
+      sequencerRef.current.onBar((active) => {
+        setActiveIds(active);
+        setPendingIds(new Map());
+      });
+    }
+    return sequencerRef.current;
+  };
 
   const persist = async (next: Kit) => {
     setKit(next);
+    sequencer().setPads(next.pads);
+    sequencer().bpm = next.bpm;
     await saveKit(next);
     setKits(await listKits());
+  };
+
+  const attachKit = async (next: Kit) => {
+    await player().loadPads(next.pads);
+    sequencer().stop();
+    setPlaying(false);
+    setActiveIds(new Set());
+    setPendingIds(new Map());
+    sequencer().setPads(next.pads);
+    sequencer().bpm = next.bpm;
   };
 
   const importSong = async (file: File) => {
@@ -61,12 +95,13 @@ export default function App() {
       }
 
       setPhase('seleccionando');
-      const chosen = selectPads(analysis.candidates, macros);
+      const bpm = detectBpm(analysis.frames);
+      const chosen = selectGroupedPads(analysis.candidates, macros);
       const name = file.name.replace(/\.[^.]+$/, '');
-      const newKit = buildKit(name, buffer, chosen);
+      const newKit = buildKit(name, buffer, chosen, bpm);
 
       sourceRef.current = { name, buffer, analysis, chosen };
-      await player().loadPads(newKit.pads);
+      await attachKit(newKit);
       await persist(newKit);
       setPhase('listo');
     } catch (e) {
@@ -80,10 +115,10 @@ export default function App() {
     if (!source || !kit) return;
     setPhase('seleccionando');
     setSelectedPadId(null);
-    const chosen = selectPads(source.analysis.candidates, macros);
-    const next = { ...buildKit(source.name, source.buffer, chosen), id: kit.id, name: kit.name };
+    const chosen = selectGroupedPads(source.analysis.candidates, macros);
+    const next = { ...buildKit(source.name, source.buffer, chosen, kit.bpm), id: kit.id, name: kit.name };
     source.chosen = chosen;
-    await player().loadPads(next.pads);
+    await attachKit(next);
     await persist(next);
     setPhase('listo');
   };
@@ -93,17 +128,25 @@ export default function App() {
     if (!source || !kit) return;
     const index = kit.pads.findIndex((p) => p.id === pad.id);
     const current = source.chosen[index];
-    const replacement = pickReplacement(source.analysis.candidates, macros, source.chosen, current);
+    const replacement = pickReplacement(
+      source.analysis.candidates,
+      macros,
+      source.chosen.map((c) => c.candidate),
+      current.candidate,
+      pad.group,
+    );
     if (!replacement) return;
 
-    source.chosen = source.chosen.map((c, i) => (i === index ? replacement : c));
-    const rebuilt = buildKit(source.name, source.buffer, [replacement]).pads[0];
-    const nextPads = kit.pads.map((p, i) => (i === index ? rebuilt : p));
-    const next = { ...kit, pads: nextPads };
+    source.chosen = source.chosen.map((c, i) => (i === index ? { candidate: replacement, group: pad.group } : c));
+    const rebuilt = buildKit(source.name, source.buffer, [{ candidate: replacement, group: pad.group }], kit.bpm)
+      .pads[0];
+    // conserva patrón y ajustes del pad reemplazado
+    const merged: Pad = { ...rebuilt, pattern: pad.pattern, gain: pad.gain, pitch: pad.pitch, reverse: pad.reverse };
+    const next = { ...kit, pads: kit.pads.map((p, i) => (i === index ? merged : p)) };
     await player().loadPads(next.pads);
     await persist(next);
-    setSelectedPadId(rebuilt.id);
-    player().play(rebuilt);
+    setSelectedPadId(merged.id);
+    player().play(merged);
   };
 
   const updatePad = async (pad: Pad) => {
@@ -115,7 +158,7 @@ export default function App() {
   const loadKit = async (k: Kit) => {
     setSelectedPadId(null);
     sourceRef.current = null; // sin la canción original no hay re-selección
-    await player().loadPads(k.pads);
+    await attachKit(k);
     setKit(k);
     setPhase('listo');
   };
@@ -123,10 +166,43 @@ export default function App() {
   const removeKit = async (id: string) => {
     await deleteKit(id);
     if (kit?.id === id) {
+      sequencer().stop();
+      setPlaying(false);
       setKit(null);
       setPhase(null);
     }
     setKits(await listKits());
+  };
+
+  const togglePlay = () => {
+    const seq = sequencer();
+    if (seq.isPlaying) {
+      seq.stop();
+      setPlaying(false);
+    } else {
+      getAudioContext(); // gesto del usuario: asegura que el contexto arranca
+      seq.start();
+      setPlaying(true);
+    }
+  };
+
+  const togglePad = (pad: Pad) => {
+    const seq = sequencer();
+    seq.toggle(pad.id);
+    setActiveIds(seq.activeIds);
+    setPendingIds(seq.pendingToggles);
+    if (!seq.isPlaying) togglePlay();
+  };
+
+  const exportTrack = async (bars: number) => {
+    if (!kit) return;
+    setExporting(true);
+    try {
+      const blob = await renderTrackWav(kit, activeIds, bars);
+      downloadBlob(blob, `${kit.name || 'track'}-groove.wav`);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const selectedPad = kit?.pads.find((p) => p.id === selectedPadId) ?? null;
@@ -139,7 +215,7 @@ export default function App() {
           KaizenKawa <span>Samplr</span>
         </h1>
         <p className="hint">
-          Convierte cualquier canción en un kit de samples tocable — análisis 100 % local, sin subir nada.
+          Convierte cualquier canción en un kit de samples y crea grooves — 100 % local, sin subir nada.
         </p>
       </header>
 
@@ -160,7 +236,7 @@ export default function App() {
           {busy ? `${phase}…` : '♫ Elegir archivo de audio'}
         </button>
         <p className="hint">
-          Se detectan los momentos musicalmente útiles (onsets, sonoridad, timbre) y se eligen 16 con diversidad.
+          Se detectan los momentos musicalmente útiles y se clasifican en Drums, Bajo, Melodía y FX.
         </p>
       </div>
 
@@ -170,24 +246,53 @@ export default function App() {
         <>
           <section className="panel">
             <div className="pad-editor__head">
-              <h2>2 · Kit: {kit.name}</h2>
-              <button
-                onClick={() => {
-                  void exportKitZip(kit).then((blob) => downloadBlob(blob, `${kit.name || 'kit'}.zip`));
-                }}
-              >
-                ⬇ Exportar WAVs
-              </button>
+              <h2>2 · {kit.name}</h2>
+              <div className="tabs">
+                <button className={mode === 'groove' ? 'tab tab--on' : 'tab'} onClick={() => setMode('groove')}>
+                  Groove
+                </button>
+                <button className={mode === 'pads' ? 'tab tab--on' : 'tab'} onClick={() => setMode('pads')}>
+                  Pads
+                </button>
+              </div>
             </div>
-            <PadGrid
-              pads={kit.pads}
-              selectedId={selectedPadId}
-              onPlay={(pad) => player().play(pad)}
-              onSelect={(pad) => setSelectedPadId(pad.id === selectedPadId ? null : pad.id)}
-            />
+
+            {mode === 'groove' ? (
+              <GrooveView
+                pads={kit.pads}
+                bpm={kit.bpm}
+                onBpmChange={(bpm) => void persist({ ...kit, bpm })}
+                playing={playing}
+                onPlayToggle={togglePlay}
+                activeIds={activeIds}
+                pendingIds={pendingIds}
+                currentStep={currentStep}
+                onPadToggle={togglePad}
+                onPatternChange={(pad, pattern) => void updatePad({ ...pad, pattern })}
+                onPreview={(pad) => player().play(pad)}
+                onExport={(bars) => void exportTrack(bars)}
+                exporting={exporting}
+              />
+            ) : (
+              <>
+                <PadGrid
+                  pads={kit.pads}
+                  selectedId={selectedPadId}
+                  onPlay={(pad) => player().play(pad)}
+                  onSelect={(pad) => setSelectedPadId(pad.id === selectedPadId ? null : pad.id)}
+                />
+                <button
+                  onClick={() => {
+                    void exportKitZip(kit).then((blob) => downloadBlob(blob, `${kit.name || 'kit'}.zip`));
+                  }}
+                >
+                  ⬇ Exportar samples (ZIP de WAVs)
+                </button>
+              </>
+            )}
           </section>
 
-          {selectedPad && selectedIndex >= 0 && (
+          {mode === 'pads' && selectedPad && selectedIndex >= 0 && (
             <PadEditor
               pad={selectedPad}
               index={selectedIndex}

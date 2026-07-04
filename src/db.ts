@@ -1,4 +1,20 @@
-import type { Kit } from './types';
+import type { Kit, Pad } from './types';
+import { PAD_GROUPS, STEPS } from './types';
+
+/** Rellena campos añadidos después de que existieran kits guardados. */
+function normalizeKit(kit: Kit): Kit {
+  return {
+    ...kit,
+    bpm: kit.bpm ?? 100,
+    pads: kit.pads.map(
+      (p, i): Pad => ({
+        ...p,
+        group: p.group ?? PAD_GROUPS[Math.floor(i / 4) % PAD_GROUPS.length],
+        pattern: p.pattern ?? new Array<boolean>(STEPS).fill(false),
+      }),
+    ),
+  };
+}
 
 const DB_NAME = 'samplr';
 const STORE = 'kits';
@@ -29,7 +45,7 @@ export function saveKit(kit: Kit): Promise<IDBValidKey> {
 
 export function listKits(): Promise<Kit[]> {
   return tx<Kit[]>('readonly', (s) => s.getAll() as IDBRequest<Kit[]>).then((all) =>
-    all.sort((a, b) => b.createdAt - a.createdAt),
+    all.map(normalizeKit).sort((a, b) => b.createdAt - a.createdAt),
   );
 }
 

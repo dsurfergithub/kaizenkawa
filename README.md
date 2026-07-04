@@ -27,11 +27,20 @@ Mueve las macros y pulsa **Re-seleccionar**: la re-selección es instantánea po
 ## Funcionalidades
 
 - Importación de cualquier audio local del móvil (selector de archivos).
-- Kit de **16 pads** en rejilla 4×4, disparo táctil con multi-touch.
-- **Edición por pad**: ganancia, tono ±12 st, reverse, y 🎲 *cambiar sample* (lo sustituye por el mejor candidato no usado).
-- **Biblioteca local** de kits en IndexedDB — sobrevive a recargas y funciona offline.
-- **Exportación**: ZIP con WAVs numerados (`01.wav`…`16.wav`), la convención de importación en bloque de Koala, SP-404MKII, Logic, Maschine, Reason, Bitwig… Los WAVs se renderizan con los ajustes del pad aplicados.
+- **Clasificación automática en 4 grupos** estilo Groovepad — Drums, Bajo, Melodía y FX — según las características de cada sample (percusividad, graves, tonalidad, ruido); 4 pads por grupo.
+- **Modo Groove** (estilo [Groovepad](https://play.google.com/store/apps/details?id=com.easybrain.make.music)):
+  - Cada pad tiene un **patrón de 16 pasos** (secuenciador de semicorcheas, un compás de 4/4) con patrones iniciales por grupo para que suene a la primera.
+  - Tocar un pad **lanza/para su loop sincronizado al siguiente compás**; solo un loop activo por grupo (activar uno apaga el anterior).
+  - **BPM detectado automáticamente** de la canción (autocorrelación de onsets) y ajustable 60–180.
+  - Reloj de audio con *lookahead* sobre el AudioContext: timing estable también en móvil.
+  - **Exportar track**: render offline de N compases (2–32) del groove activo a WAV estéreo, con los ajustes de cada pad aplicados y mezcla normalizada a −1 dBFS.
+- **Modo Pads**: disparo one-shot clásico, edición por pad (ganancia, tono ±12 st, reverse, 🎲 cambiar sample por otro candidato del mismo grupo) y export del kit como ZIP de WAVs numerados (`01.wav`…`16.wav`, la convención de Koala, SP-404MKII, Logic, Maschine…).
+- **Biblioteca local** de kits en IndexedDB (incluye patrones y BPM) — sobrevive a recargas y funciona offline.
 - **PWA instalable** con service worker: úsala sin conexión.
+
+### Icono de la app
+
+El manifest apunta a `public/icons/icon-192.png`, `icon-512.png` y `apple-touch-icon.png` (180×180). Ahora contienen un placeholder generado desde el SVG; para usar tu ilustración, sustituye esos tres PNG por tu imagen (cuadrada) con los mismos nombres — no hay que tocar código.
 
 ## Evaluación técnica: por qué PWA
 
@@ -61,18 +70,21 @@ src/
   analysis/
     fft.ts         # FFT radix-2 + ventana Hann
     analyze.ts     # STFT, features por frame, onsets, candidatos
-    select.ts      # scoring con macros + selección greedy con diversidad
-    kitBuilder.ts  # extracción de slices y montaje del kit
+    tempo.ts       # detección de BPM por autocorrelación de onsets
+    select.ts      # clasificación en grupos + scoring con macros + diversidad
+    kitBuilder.ts  # extracción de slices, grupos y patrones por defecto
   audio/
     context.ts     # AudioContext compartido
-    padPlayer.ts   # disparo de pads (gain, pitch, reverse)
+    padPlayer.ts   # disparo de pads (gain, pitch, reverse, programable)
+    sequencer.ts   # secuenciador groove: lookahead, sync a compás, 1 loop/grupo
     processing.ts  # trim de silencio, normalización, fades
     wav.ts         # codificación/decodificación WAV 16-bit
   export/
     kit.ts         # render de pads con ajustes + ZIP de WAVs numerados
+    track.ts       # render offline del groove (N compases) a WAV estéreo
     zip.ts         # escritor ZIP sin dependencias (método store)
-  components/      # PadGrid, MacroControls, PadEditor, Library
-  db.ts            # persistencia IndexedDB
+  components/      # GrooveView, PadGrid, MacroControls, PadEditor, Library
+  db.ts            # persistencia IndexedDB (con migración de campos nuevos)
 public/
   manifest.webmanifest, sw.js, icons/   # PWA
 ```
@@ -83,5 +95,6 @@ public/
 - [ ] Análisis en un Web Worker para no tocar el hilo de UI con canciones largas.
 - [ ] Vista de forma de onda con los slices marcados y ajuste fino de inicio/fin por pad.
 - [ ] Export `.adg` (Ableton Drum Rack) y `.ablpresetbundle`.
-- [ ] Detección de tempo/compás para cuantizar slices a la rejilla.
-- [ ] Secuenciador de pasos simple para probar el kit en contexto.
+- [ ] Grabación en vivo de la sesión groove (looper) además del render por compases.
+- [ ] Patrones de más de un compás (2/4 compases) y swing ajustable.
+- [ ] FX de interpretación estilo Groovepad (filtro, flanger, gate) sobre la mezcla.

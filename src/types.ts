@@ -7,6 +7,20 @@ export interface PadParams {
   reverse: boolean;
 }
 
+/** Grupos de la rejilla groove, al estilo Groovepad. */
+export type PadGroup = 'drums' | 'bass' | 'melody' | 'fx';
+
+export const PAD_GROUPS: PadGroup[] = ['drums', 'bass', 'melody', 'fx'];
+export const GROUP_LABELS: Record<PadGroup, string> = {
+  drums: 'Drums',
+  bass: 'Bajo',
+  melody: 'Melodía',
+  fx: 'FX',
+};
+
+/** Pasos del secuenciador por pad (semicorcheas de un compás de 4/4). */
+export const STEPS = 16;
+
 /** Un pad del kit: una muestra extraída de la canción + sus ajustes. */
 export interface Pad extends PadParams {
   id: string;
@@ -14,6 +28,9 @@ export interface Pad extends PadParams {
   /** Momento de la canción del que salió (segundos), para referencia. */
   sourceTime: number;
   wav: ArrayBuffer;
+  group: PadGroup;
+  /** Patrón de 16 pasos del secuenciador. */
+  pattern: boolean[];
 }
 
 export interface Kit {
@@ -21,6 +38,7 @@ export interface Kit {
   name: string;
   createdAt: number;
   sampleRate: number;
+  bpm: number;
   pads: Pad[];
 }
 

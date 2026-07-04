@@ -40,7 +40,8 @@ export class PadPlayer {
     );
   }
 
-  play(pad: Pad): void {
+  /** Dispara el pad; `when` (tiempo del AudioContext) permite programarlo con precisión. */
+  play(pad: Pad, when = 0): void {
     let buffer = this.buffers.get(pad.id);
     if (!buffer) return;
     if (pad.reverse) {
@@ -58,7 +59,7 @@ export class PadPlayer {
     const gain = ctx.createGain();
     gain.gain.value = pad.gain;
     source.connect(gain).connect(this.master);
-    source.start();
+    source.start(when);
   }
 
   /** Invalida la caché de un pad tras editarlo (p. ej. cambio de reverse). */
